@@ -4,10 +4,8 @@ import arrow
 import datetime
 import numpy as np
 
-def get_quote_data(symbol='AAPL', data_range='7d', data_interval='1m'):
-    res = requests.get(
-        'https://query1.finance.yahoo.com/v8/finance/chart/AAPL?range=7d&interval=1m'.format(
-            **locals()))
+def get_quote_data(symbol='AAPL', data_range='7d', data_interval='1s'):
+    res = requests.get(f'https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range={data_range}&interval={data_interval}')
     data = res.json()
     body = data['chart']['result'][0]
     dt = datetime.datetime
