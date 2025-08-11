@@ -123,6 +123,87 @@ def sparsify(df):
 # ML Preprocessing
 #==================================================================================
 
+def response_peak(prices, signs, window):
+    results = []
+
+    for i in range(len(prices)):
+        if i < window:
+            results.append(np.nan)
+            continue
+        
+        p = prices[i-window:i].values
+        s = signs[i-window:i].values
+        
+        response_values = []
+        for lag in range(1, min(21, len(p))):
+            if lag >= len(p):
+                break
+            price_diffs = p[lag:] - p[:-lag]
+            trade_signs = s[:-lag]
+            if len(price_diffs) > 0:
+                response_values.append(np.mean(price_diffs * trade_signs))
+        
+        if len(response_values) > 3:
+            peak_lag = np.argmax(response_values) + 1
+            peak_value = np.max(response_values)
+            results.append(peak_lag)
+        else:
+            results.append(np.nan)
+    return pd.Series(results, index=prices.index)
+
+def rolling_gamma(signs, window):
+    results = []
+    for i in range(len(signs)):
+        if i < window:
+            results.append(np.nan)
+            continue
+        
+        s = signs[i-window:i].values
+
+        # Sign corr for each lag
+        correlations = []
+        for lag in range(1, min(21, len(s)//2)):
+            if lag >= len(s):
+                break
+            corr = np.corrcoef(s[:-lag], s[lag:])[0,1]
+            if np.isfinite(corr) and corr > 0:
+                correlations.append(corr)
+        
+        if len(correlations) > 3:
+            # log(corr) = log(A) - gamma*log(lag)
+            lags = np.arange(1, len(correlations) + 1)
+            log_corr = np.log(correlations)
+            log_lags = np.log(lags)
+            gamma = -np.polyfit(log_lags, log_corr, 1)[0]
+            results.append(max(0, gamma))
+        else:
+            results.append(np.nan)
+
+    return pd.Series(results, index=signs.index)
+
+def effective_trades(signs, window):
+    results = []
+    for i in range(len(signs)):
+        if i < window:
+            results.append(np.nan)
+            continue
+        
+        s = signs[i-window:i].values
+        total_corr = 1.0
+
+        for lag in range(1, min(21, len(s)//2)):
+            if lag >= len(s):
+                break
+            corr = np.corrcoef(s[:-lag], s[lag:])[0,1]
+            if np.isfinite(corr) and corr > 0:
+                total_corr += corr
+            else:
+                break 
+        
+        results.append(total_corr)
+    return pd.Series(results, index=signs.index)
+
+
 def features(trades, windows=[5, 20, 50]):
 
     features = trades.copy()
@@ -186,6 +267,21 @@ def features(trades, windows=[5, 20, 50]):
     features['price_trend_5'] = (features['price'] - features['price'].shift(5)) / features['price'].shift(5)
     features['price_trend_20'] = (features['price'] - features['price'].shift(20)) / features['price'].shift(20)
 
+    features['response_peak_lag'] = response_peak(features['price'], features['trade_sign'], windows[0])
+    features['corr_gamma'] = rolling_gamma(features['trade_sign'], windows[0])
+
+    features['effective_trades'] = effective_trades(features['trade_sign'], windows[0])
+
+    # Local diffusion vs response
+    features['local_diffusion'] = features['returns'].rolling(windows[0]).var()
+    features['local_response_strength'] = features['trade_sign'].rolling(windows[0]).apply(
+        lambda x: abs(np.corrcoef(x[:-1], np.diff(features.loc[x.index, 'price']))[0,1]) 
+                    if len(x) > 10 and len(np.diff(features.loc[x.index, 'price'])) == len(x)-1 
+                    else np.nan, raw=False)
+    
+    # Critical behavior indicator (distance from criticality)
+    features['criticality'] = np.abs(2 * ((1 - features['corr_gamma'])/2) + features['corr_gamma'] - 1)
+
     # Drop rows with NaN value
     features = features.dropna()
 
@@ -194,6 +290,21 @@ def features(trades, windows=[5, 20, 50]):
     print(features.shape)
 
     return features
+
+def feature_columns(df, exclude_targets=True):
+    
+    exclude_cols = [
+        'timestamp', 'trade_id', 'open_time', 'ignore',
+        'price', 'open', 'high', 'low', 'close'  # raw price data is excluded because we want to learn off market microstructure and market dynamics not price
+    ]
+    
+    if exclude_targets:
+        exclude_cols.extend([
+            'price_change_1', 'price_change_5', 'price_change_20'  # target variables
+        ])
+    
+    feature_cols = [col for col in df.columns if col not in exclude_cols]
+    return feature_cols
 
 # utility function to parse cli args 
 def parse_args():
@@ -214,3 +325,6 @@ if __name__ == "__main__":
         trades_w_quote = pd.read_csv('../data/trades_w_quotes.csv')
 
     feature_df = features(trades_w_quote)
+    feature_cols = feature_columns(feature_df)
+
+    print("Feature columns:", feature_cols)

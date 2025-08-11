@@ -227,7 +227,7 @@ def analyze_critical_behavior(response_data, correlation_data, power_law_data, b
 # Plotting Functions
 #==================================================================================
 
-def plot_response_function(response_data, save_path=None):
+def plot_response(response_data, save_path=None):
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.loglog(response_data['lags'], response_data['values'], 'ko-', 
              linewidth=2, markersize=4, label='R(ℓ)')
@@ -241,7 +241,7 @@ def plot_response_function(response_data, save_path=None):
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.tight_layout()
-    plt.show()
+    plt.savefig("../plots/response_function.png", dpi=300, bbox_inches='tight')
 
 
 def plot_volume_conditioned_response(volume_response_data, response_data, save_path=None):
@@ -277,10 +277,10 @@ def plot_volume_conditioned_response(volume_response_data, response_data, save_p
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.tight_layout()
-    plt.show()
+    plt.savefig("../plots/conditioned_response_function.png", dpi=300, bbox_inches='tight')
 
 
-def plot_correlation_functions(correlation_data, power_law_data=None, save_path=None):
+def plot_correlations(correlation_data, power_law_data=None, save_path=None):
     fig, ax = plt.subplots(figsize=(12, 8))
     
     lags = correlation_data['lags']
@@ -328,7 +328,7 @@ def plot_correlation_functions(correlation_data, power_law_data=None, save_path=
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.tight_layout()
-    plt.show()
+    plt.savefig("../plots/correlation_functions.png", dpi=300, bbox_inches='tight')
 
 
 def plot_critical_analysis(critical_data, response_data, save_path=None):
@@ -378,13 +378,13 @@ def plot_critical_analysis(critical_data, response_data, save_path=None):
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
     plt.tight_layout()
-    plt.show()
+    plt.savefig("../plots/fit_quality.png", dpi=300, bbox_inches='tight')
 
 #==================================================================================
 # Summary and Main Analysis
 #==================================================================================
 
-def print_analysis_summary(response_data, correlation_data, power_law_data, critical_data, 
+def summary(response_data, correlation_data, power_law_data, critical_data, 
                           prices, volumes):
     """Print comprehensive analysis summary."""
     print("=" * 60)
@@ -410,14 +410,6 @@ def print_analysis_summary(response_data, correlation_data, power_law_data, crit
         
         best_mse = critical_data['fit_scores'][critical_data['best_beta']]
         print(f"• Best fit MSE = {best_mse:.2e}")
-    
-    print(f"\nPhysical Interpretation:")
-    print(f"• Market exhibits long-range memory in trade signs")
-    print(f"• Price response shows temporary-to-permanent transition")
-    print(f"• Critical balance between correlation and impact decay")
-    print(f"• Results consistent with diffusive price process")
-    print("=" * 60)
-
 
 def bouchaud_analysis(prices, signs, volumes, max_lag=1000, plot=True, save_plots=False):
 
@@ -448,14 +440,14 @@ def bouchaud_analysis(prices, signs, volumes, max_lag=1000, plot=True, save_plot
     # Generate plots
     if plot:
         print("• Generating plots...")
-        plot_response_function(response_data)
+        plot_response(response_data)
         plot_volume_conditioned_response(volume_response_data, response_data)
-        plot_correlation_functions(correlation_data, power_law_data)
+        plot_correlations(correlation_data, power_law_data)
         if critical_data is not None:
             plot_critical_analysis(critical_data, response_data)
     
     # Print summary
-    print_analysis_summary(response_data, correlation_data, power_law_data, 
+    summary(response_data, correlation_data, power_law_data, 
                           critical_data, prices, volumes)
     
     # Compile results
@@ -476,4 +468,3 @@ if __name__ == "__main__":
     signs = trades['trade_sign'].values
     volumes = trades['volume'].values
     results = bouchaud_analysis(prices, signs, volumes)
-    print("Individual functions also available for modular analysis")
