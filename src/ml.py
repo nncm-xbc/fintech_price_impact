@@ -49,28 +49,6 @@ def update_step(params, x_batch, y_batch, learning_rate):
     return [(w - learning_rate * dw, b - learning_rate * db)
             for (w, b), (dw, db) in zip(params, grads)]
 
-def features(trades_df, window=20):
-    """Create simple trading features"""
-    features = pd.DataFrame()
-    
-    # Basic features
-    features['log_volume'] = jnp.log(trades_df['volume_normalized'] + 1e-8)
-    features['trade_sign'] = trades_df['trade_sign']
-    features['price'] = trades_df['price']
-    
-    # Rolling features
-    features['volatility'] = trades_df['price'].rolling(window).std().fillna(0)
-    features['volume_ma'] = trades_df['volume_normalized'].rolling(window).mean().fillna(0)
-    
-    return features.values
-
-def target(trades_df, horizon=5):
-    """Create prediction target (signed price impact)"""
-    price_change = trades_df['price'].shift(-horizon) - trades_df['price']
-    signed_impact = price_change * trades_df['trade_sign']
-    return signed_impact.fillna(0).values
-
-
 def square_root_baseline(volumes, signs):
     """Simple Square-Root Law baseline"""
     return 0.001 * jnp.sqrt(volumes) * signs
@@ -81,17 +59,6 @@ def propagator_baseline(volumes, signs, horizon=5):
     Gamma0, t0, beta = 0.001, 20, 0.38
     G0 = Gamma0 * (t0**beta) / ((t0 + horizon)**beta)
     return G0 * jnp.log(volumes + 1e-8) * signs
-
-# Create features using numpy (not JAX) 
-features = pd.DataFrame()
-features['log_volume'] = np.log(trades_clean['volume_normalized'] + 1e-8)
-features['trade_sign'] = trades_clean['trade_sign']
-features['price'] = trades_clean['price']
-features['volume_ma_20'] = trades_clean['volume_normalized'].rolling(20).mean()
-features['price_volatility'] = trades_clean['price'].rolling(20).std()
-
-# Create target
-target = (trades_clean['price'].shift(-5) - trades_clean['price']) * trades_clean['trade_sign']
 
 # Clean data
 valid_idx = ~(features.isna().any(axis=1) | target.isna())
