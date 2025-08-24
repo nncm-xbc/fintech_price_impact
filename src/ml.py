@@ -4,10 +4,8 @@ import jax.numpy as jnp
 import jax
 from jax import grad, jit, vmap, random
 from sklearn.preprocessing import StandardScaler, RobustScaler
-from sklearn.metrics import r2_score
 from data_processing import feature_columns
 from bouchaud_analysis import propagator_function
-import joblib
 import pickle
 
 #==================================================================================
@@ -16,7 +14,7 @@ import pickle
 
 def init_layer_params(m, n, key, scale=1e-2):
     w_key, b_key = random.split(key)
-    return scale * random.normal(w_key, (n, m)), scale * random.normal(b_key, (n,))
+    return scale * random.normal(w_key, (n, m)), jnp.zeros((n,))
 
 def init_network(layer_sizes, key):
     keys = random.split(key, len(layer_sizes))
@@ -27,16 +25,15 @@ def relu(x):
 
 @jit
 def predict_single(params, x):
-    # Forward pass for a single sample.
     activations = x
     for w, b in params[:-1]:
         outputs = jnp.dot(w, activations) + b
+        outputs = jnp.clip(outputs, -10, 10)  # Prevent explosion
         activations = relu(outputs)
     
-    # Final layer (no activation for regression)
     final_w, final_b = params[-1]
     output = jnp.dot(final_w, activations) + final_b
-    return output[0]
+    return jnp.clip(output[0], -10, 10) 
 
 # Vectorized prediction
 predict_batch = vmap(predict_single, in_axes=(None, 0))
@@ -48,10 +45,17 @@ def mse_loss(params, x_batch, y_batch):
 
 @jit
 def update_params(params, x_batch, y_batch, learning_rate):
-    # Single gradient update step.
     grads = grad(mse_loss)(params, x_batch, y_batch)
+    
+    # Clip gradients
+    clipped_grads = []
+    for (dw, db) in grads:
+        dw = jnp.clip(dw, -1.0, 1.0)
+        db = jnp.clip(db, -1.0, 1.0)
+        clipped_grads.append((dw, db))
+    
     return [(w - learning_rate * dw, b - learning_rate * db)
-            for (w, b), (dw, db) in zip(params, grads)]
+            for (w, b), (dw, db) in zip(params, clipped_grads)]
 
 def train(X, y, layer_sizes=None, learning_rate=0.001, n_epochs=500, 
                         batch_size=256, random_seed=42):
@@ -193,18 +197,20 @@ def print_model_performance(results):
 # Data Processing Functions
 #==================================================================================
 
-def prep_data(feature_file='../data/features_test.csv', target_file='../data/target_test.csv', test_split=0.8):
+def prep_data(feature_file='../data/features_part.csv', target_col='price_change_5', test_split=0.8):
+
+    total_rows = sum(1 for _ in open(feature_file)) - 1  # -1 for header
+    half_rows = total_rows // 10
 
     # Load data
-    df = pd.read_csv(feature_file)
-    target = pd.read_csv(target_file)
+    df = pd.read_csv(feature_file, nrows=half_rows)
 
     # Get feature columns
     feature_cols = feature_columns(df, exclude_targets=True)
     
     # Prepare features and target
     X = df[feature_cols].values
-    y = target.values
+    y = df[target_col].values
 
     # Train/test split
     split_idx = int(len(X) * test_split)
@@ -219,31 +225,28 @@ if __name__ == "__main__":
 
     print("JAX devices:", jax.devices())
 
-    #layer_sizes = [14*14, 10, 10, 10]
-    layer_sizes = [14*14, 64, 32, 16, 1]
+    layer_sizes = [71, 64, 32, 1] # the first value will be overwritten by the input dimension
 
-    learning_rate = 0.0005
-    step_size = 0.01
-    batch_epochs = 100
-    num_epochs = batch_epochs * 10
-    batch_size = 1024
+    learning_rate = 0.0001
+    num_epochs = 200
+    batch_size = 256
     params = init_network(layer_sizes, random.PRNGKey(0))
 
     # Load and prepare data
     print("\n1. Loading data...")
-    X_train, X_test, y_train, y_test, feature_cols  = prep_data('../data/features_test.csv', '../data/target_test.csv')
+    X_train, X_test, y_train, y_test, feature_cols  = prep_data('../data/features_part.csv')
     
     print(f"Valid samples: {len(X_train) + len(X_test)}")
-    print(f"Features: {feature_cols}")
     print(f"Train: {X_train.shape}, Test: {X_test.shape}")
-    
+    print(f"Target: {y_train.shape}, {y_test.shape}")
+
     # Train neural network
     print("\n2. Training...")
     nn_params, nn_scaler = train(X_train, y_train, layer_sizes, learning_rate, num_epochs, batch_size)
 
     # save params
-    save_params(nn_params, '../models/nn_params.pkl')
-    save_params(nn_scaler, '../models/nn_scaler.pkl')
+    save_params(nn_params, '../models/params.pkl')
+    save_params(nn_scaler, '../models/scaler.pkl')
 
     # Evaluate all models
     print("\n3. Evaluating models...")

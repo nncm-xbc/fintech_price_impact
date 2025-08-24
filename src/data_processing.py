@@ -526,26 +526,6 @@ def feature_columns(df, exclude_targets=True):
     feature_cols = [col for col in df.columns if col not in exclude_cols]
     return feature_cols
 
-def target(features_df, horizon=5):
-
-    # Ensure price column exists
-    if 'price' not in features_df.columns:
-        raise ValueError("Price column not found in features DataFrame")
-    
-    price = features_df['price'].fillna(method='ffill').fillna(method='bfill')
-    trade_sign = features_df['trade_sign'].fillna(0)
-    
-    # Future price change
-    price_change = price.shift(-horizon) - price
-    
-    # handle end-of-series NaN values
-    price_change = price_change.fillna(price_change.mean())
-    
-    # Signed impact target
-    target = price_change * trade_sign
-    
-    return target.fillna(0)
-
 # utility function to parse cli args 
 def parse_args():
     parser = argparse.ArgumentParser(description="Data Processing Script")
@@ -567,10 +547,7 @@ if __name__ == "__main__":
     feature_df = features(trades_w_quote)
     feature_cols = feature_columns(feature_df)
 
-    target = target(feature_df)
-
-    feature_df.to_csv("../data/features_test.csv", index=False)
-    target.to_csv("../data/target_test.csv", index=False, header=['price_change_5'])
+    feature_df.to_csv("../data/features_part.csv", index=False)
 
     print(f"Final dataset: {len(feature_df)} samples, {len(feature_cols)} features")
     print(f"Feature columns: {feature_cols}")
