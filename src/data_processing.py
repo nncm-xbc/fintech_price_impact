@@ -79,6 +79,9 @@ def collect_quotes():
 def match_quotes(trades, quotes):
 
     # Match trades with quotes based on timestamp
+    trades['timestamp'] = pd.to_datetime(trades['timestamp'], unit='ns')
+    quotes['open_time'] = pd.to_datetime(quotes['open_time'], unit='ns')
+
     trades = trades.sort_values('timestamp')
     quotes = quotes.sort_values('open_time')
 
@@ -555,9 +558,10 @@ if __name__ == "__main__":
     
     if collect:
         # trades = collect_trades()
-        ohlvc = collect_quotes()
-        trades = pd.read_csv('../data/trades_dense.csv')    
-        trades = sparsify(trades)
+        # ohlvc = collect_quotes()
+        # trades = sparsify(trades)
+        trades = pd.read_csv('../data/trades_sparse.csv')  
+        ohlvc = pd.read_csv('../data/ohlvc.csv')  
         trades_w_quote = match_quotes(trades, ohlvc)
     else:
         trades_w_quote = pd.read_csv('../data/trades_w_quotes.csv')
@@ -565,7 +569,10 @@ if __name__ == "__main__":
     feature_df = features(trades_w_quote)
     feature_cols = feature_columns(feature_df)
 
+    target = target(feature_df)
+
     feature_df.to_csv("../data/features_test.csv", index=False)
+    target.to_csv("../data/target_test.csv", index=False, header=['price_change_5'])
 
     print(f"Final dataset: {len(feature_df)} samples, {len(feature_cols)} features")
     print(f"Feature columns: {feature_cols}")
