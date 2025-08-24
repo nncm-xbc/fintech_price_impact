@@ -203,99 +203,316 @@ def effective_trades(signs, window):
         results.append(total_corr)
     return pd.Series(results, index=signs.index)
 
-
-def features(trades, windows=[5, 20, 50]):
+def features(trades, windows=[5, 20, 50], min_warmup=100):
 
     features = trades.copy()
-
-    # Basic price features
-    features['returns'] = features['price'].pct_change()
-    features['log_returns'] = np.log(features['price'] / features['price'].shift(1))
-
-    # Volatility metrics
-    for window in windows:
-        features[f'volatility_{window}'] = features['returns'].rolling(window).std()
-        features[f'price_range_{window}'] = (features['high'] - features['low']).rolling(window).mean()
-        features[f'hl_volatility_{window}'] = np.log(features['high'] / features['low']).rolling(window).mean()
     
-    # Volume patterns
-    features['log_volume'] = np.log(features['volume_x'] + 1e-10)
-    features['sqrt_volume'] = np.sqrt(features['volume_x'])
+    # ================================
+    # DATA CLEANING AND PREPARATION
+    # ================================
+    
+    # Clean core columns
+    features['price'] = features['price'].ffill().bfill()
+    features['midpoint'] = features['midpoint'].ffill().bfill()
+    
+    volume_col = 'volume_x' if 'volume_x' in features.columns else 'volume_normalized'
+    features[volume_col] = features[volume_col].fillna(1)
+    
+    # Quote/spread data
+    if 'midpoint' in features.columns:
+        features['midpoint'] = features['midpoint'].ffill().bfill()
+    if 'spread' in features.columns:
+        features['spread'] = features['spread'].fillna(0)
+    if 'high' in features.columns and 'low' in features.columns:
+        features['high'] = features['high'].fillna(features['price'])
+        features['low'] = features['low'].fillna(features['price'])
+    
+    # Order flow data
+    if 'taker_buy_volume' in features.columns:
+        features['taker_buy_volume'] = features['taker_buy_volume'].fillna(0)
+    if 'volume_y' in features.columns:
+        features['volume_y'] = features['volume_y'].fillna(features[volume_col])
+    if 'count' in features.columns:
+        features['count'] = features['count'].fillna(1)
+    
+    # ================================
+    # BASIC PRICE FEATURES
+    # ================================
+    
+    features['returns'] = features['price'].pct_change().fillna(0)
+    features['log_returns'] = np.log(features['price'] / features['price'].shift(1)).fillna(0)
 
-    for window in windows:
-        features[f'volume_ma_{window}'] = features['volume_x'].rolling(window).mean()
-        features[f'volume_std_{window}'] = features['volume_x'].rolling(window).std()
-        features[f'volume_ratio_{window}'] = features['volume_x'] / features[f'volume_ma_{window}']
-
-    # Spread dynamics
-    features['relative_spread'] = features['spread'] / features['midpoint']
-    features['spread_bps'] = features['spread'] / features['midpoint'] * 10000  # basis points
-
-    for window in windows:
-        features[f'spread_ma_{window}'] = features['relative_spread'].rolling(window).mean()
-        features[f'spread_std_{window}'] = features['relative_spread'].rolling(window).std()
-
-    # Order flow imbalance
-    features['buy_ratio'] = features['taker_buy_volume'] / (features['volume_y'] + 1e-10)
-    features['order_imbalance'] = (features['taker_buy_volume'] * 2 - features['volume_y']) / features['volume_y']
-
-    for window in windows:
-        features[f'buy_ratio_ma_{window}'] = features['buy_ratio'].rolling(window).mean()
-        features[f'imbalance_ma_{window}'] = features['order_imbalance'].rolling(window).mean()
-
-    # Trade sign patterns
-    for window in windows:
-        features[f'sign_sum_{window}'] = features['trade_sign'].rolling(window).sum()
-        features[f'sign_mean_{window}'] = features['trade_sign'].rolling(window).mean()
-        features[f'sign_std_{window}'] = features['trade_sign'].rolling(window).std()
-
-    # Trade frequency and timing
-    features['trade_count'] = features['count']
+    # ================================
+    # VOLATILITY METRICS
+    # ================================
     
     for window in windows:
-        features[f'trade_count_ma_{window}'] = features['count'].rolling(window).mean()
+        # Price volatility - expanding window fallback for early observations
+        vol_rolling = features['returns'].rolling(window).std()
+        vol_expanding = features['returns'].expanding().std()
+        features[f'volatility_{window}'] = vol_rolling.fillna(vol_expanding).fillna(0)
+        
+        # Price range features
+        if 'high' in features.columns and 'low' in features.columns:
+            price_range = features['high'] - features['low']
+            range_rolling = price_range.rolling(window).mean()
+            range_expanding = price_range.expanding().mean()
+            features[f'price_range_{window}'] = range_rolling.fillna(range_expanding).fillna(0)
+            
+            # High-low volatility
+            hl_ratio = np.log((features['high'] + 1e-10) / (features['low'] + 1e-10))
+            hl_rolling = hl_ratio.rolling(window).mean()
+            hl_expanding = hl_ratio.expanding().mean()
+            features[f'hl_volatility_{window}'] = hl_rolling.fillna(hl_expanding).fillna(0)
+        else:
+            # Fallback if no high/low data
+            features[f'price_range_{window}'] = features[f'volatility_{window}']
+            features[f'hl_volatility_{window}'] = features[f'volatility_{window}']
+    
+    # ================================
+    # VOLUME PATTERNS
+    # ================================
+    
+    features['log_volume'] = np.log(features[volume_col] + 1e-10)
+    features['sqrt_volume'] = np.sqrt(features[volume_col])
 
-    # Price impact features (basic)
-    features['price_change_1'] = features['price'].shift(-1) - features['price']
-    features['price_change_5'] = features['price'].shift(-5) - features['price']
-    features['price_change_20'] = features['price'].shift(-20) - features['price']
+    for window in windows:
+        # Volume moving averages
+        vol_ma_rolling = features[volume_col].rolling(window).mean()
+        vol_ma_expanding = features[volume_col].expanding().mean()
+        features[f'volume_ma_{window}'] = vol_ma_rolling.fillna(vol_ma_expanding).fillna(1)
+        
+        # Volume standard deviation
+        vol_std_rolling = features[volume_col].rolling(window).std()
+        vol_std_expanding = features[volume_col].expanding().std()
+        features[f'volume_std_{window}'] = vol_std_rolling.fillna(vol_std_expanding).fillna(0)
+        
+        # Volume ratio
+        features[f'volume_ratio_{window}'] = features[volume_col] / (features[f'volume_ma_{window}'] + 1e-10)
 
-    # Square-root law baseline
+    # ================================
+    # SPREAD DYNAMICS
+    # ================================
+    
+    if 'spread' in features.columns and 'midpoint' in features.columns:
+        features['relative_spread'] = features['spread'] / (features['midpoint'] + 1e-10)
+        features['spread_bps'] = features['relative_spread'] * 10000  # basis points
+
+        for window in windows:
+            spread_ma_rolling = features['relative_spread'].rolling(window).mean()
+            spread_ma_expanding = features['relative_spread'].expanding().mean()
+            features[f'spread_ma_{window}'] = spread_ma_rolling.fillna(spread_ma_expanding).fillna(0.0001)
+            
+            spread_std_rolling = features['relative_spread'].rolling(window).std()
+            spread_std_expanding = features['relative_spread'].expanding().std()
+            features[f'spread_std_{window}'] = spread_std_rolling.fillna(spread_std_expanding).fillna(0)
+    else:
+        # Create dummy spread features if not available
+        features['relative_spread'] = 0.0001  # Small constant spread
+        features['spread_bps'] = 1.0
+        for window in windows:
+            features[f'spread_ma_{window}'] = 0.0001
+            features[f'spread_std_{window}'] = 0
+
+    # ================================
+    # ORDER FLOW IMBALANCE
+    # ================================
+    
+    if 'taker_buy_volume' in features.columns and 'volume_y' in features.columns:
+        features['buy_ratio'] = features['taker_buy_volume'] / (features['volume_y'] + 1e-10)
+        features['order_imbalance'] = (features['taker_buy_volume'] * 2 - features['volume_y']) / (features['volume_y'] + 1e-10)
+
+        for window in windows:
+            buy_ma_rolling = features['buy_ratio'].rolling(window).mean()
+            buy_ma_expanding = features['buy_ratio'].expanding().mean()
+            features[f'buy_ratio_ma_{window}'] = buy_ma_rolling.fillna(buy_ma_expanding).fillna(0.5)
+            
+            imbal_ma_rolling = features['order_imbalance'].rolling(window).mean()
+            imbal_ma_expanding = features['order_imbalance'].expanding().mean()
+            features[f'imbalance_ma_{window}'] = imbal_ma_rolling.fillna(imbal_ma_expanding).fillna(0)
+    else:
+        # Create neutral order flow features if data is not available
+        features['buy_ratio'] = 0.5
+        features['order_imbalance'] = 0
+        for window in windows:
+            features[f'buy_ratio_ma_{window}'] = 0.5
+            features[f'imbalance_ma_{window}'] = 0
+
+    # ================================
+    # TRADE SIGN PATTERNS
+    # ================================
+    
+    for window in windows:
+        # Sign sum
+        sign_sum_rolling = features['trade_sign'].rolling(window).sum()
+        sign_sum_expanding = features['trade_sign'].expanding().sum()
+        features[f'sign_sum_{window}'] = sign_sum_rolling.fillna(sign_sum_expanding).fillna(0)
+        
+        # Sign mean
+        sign_mean_rolling = features['trade_sign'].rolling(window).mean()
+        sign_mean_expanding = features['trade_sign'].expanding().mean()
+        features[f'sign_mean_{window}'] = sign_mean_rolling.fillna(sign_mean_expanding).fillna(0)
+        
+        # Sign std
+        sign_std_rolling = features['trade_sign'].rolling(window).std()
+        sign_std_expanding = features['trade_sign'].expanding().std()
+        features[f'sign_std_{window}'] = sign_std_rolling.fillna(sign_std_expanding).fillna(0.5)
+
+    # ================================
+    # TRADE FREQUENCY AND TIMING
+    # ================================
+    
+    if 'count' in features.columns:
+        features['trade_count'] = features['count']
+        for window in windows:
+            count_ma_rolling = features['count'].rolling(window).mean()
+            count_ma_expanding = features['count'].expanding().mean()
+            features[f'trade_count_ma_{window}'] = count_ma_rolling.fillna(count_ma_expanding).fillna(1)
+    else:
+        features['trade_count'] = 1
+        for window in windows:
+            features[f'trade_count_ma_{window}'] = 1
+
+    # ================================
+    # PRICE IMPACT FEATURES
+    # ================================
+    
+    price_change_1 = features['price'].shift(-1) - features['price']
+    price_change_5 = features['price'].shift(-5) - features['price']
+    price_change_20 = features['price'].shift(-20) - features['price']
+    
+    # Fill forward-looking NaN values with mean reversion assumption
+    features['price_change_1'] = price_change_1.fillna(price_change_1.mean())
+    features['price_change_5'] = price_change_5.fillna(price_change_5.mean())
+    features['price_change_20'] = price_change_20.fillna(price_change_20.mean())
+
+    # ================================
+    # SQUARE-ROOT LAW BASELINE
+    # ================================
+    
     features['sqrt_impact_baseline'] = features['sqrt_volume'] * features[f'volatility_{windows[1]}']
 
-    # Market regime indicators
-    features['price_trend_5'] = (features['price'] - features['price'].shift(5)) / features['price'].shift(5)
-    features['price_trend_20'] = (features['price'] - features['price'].shift(20)) / features['price'].shift(20)
-
-    features['response_peak_lag'] = response_peak(features['price'], features['trade_sign'], windows[0])
-    features['corr_gamma'] = rolling_gamma(features['trade_sign'], windows[0])
-
-    features['effective_trades'] = effective_trades(features['trade_sign'], windows[0])
-
-    # Local diffusion vs response
-    features['local_diffusion'] = features['returns'].rolling(windows[0]).var()
-    features['local_response_strength'] = features['trade_sign'].rolling(windows[0]).apply(
-        lambda x: abs(np.corrcoef(x[:-1], np.diff(features.loc[x.index, 'price']))[0,1]) 
-                    if len(x) > 10 and len(np.diff(features.loc[x.index, 'price'])) == len(x)-1 
-                    else np.nan, raw=False)
+    # ================================
+    # MARKET REGIME INDICATORS (PRICE TRENDS)
+    # ================================
     
-    # Critical behavior indicator (distance from criticality)
-    features['criticality'] = np.abs(2 * ((1 - features['corr_gamma'])/2) + features['corr_gamma'] - 1)
+    price_5_ago = features['price'].shift(5).fillna(features['price'])
+    price_20_ago = features['price'].shift(20).fillna(features['price'])
+    
+    features['price_trend_5'] = (features['price'] - price_5_ago) / (price_5_ago + 1e-10)
+    features['price_trend_20'] = (features['price'] - price_20_ago) / (price_20_ago + 1e-10)
 
-    # Drop rows with NaN value
-    features = features.dropna()
+    # ================================
+    # COMPLEX FEATURES
+    # ================================
+    
+    # Rolling correlation between returns and lagged trade signs
+    response_proxy_list = []
+    for i in range(len(features)):
+        if i < windows[0]:
+            response_proxy_list.append(windows[0] // 2)  # Default to mid-window
+        else:
+            window_returns = features['returns'].iloc[i-windows[0]:i]
+            window_signs = features['trade_sign'].iloc[i-windows[0]:i]
+            if len(window_returns) > 2 and window_returns.std() > 0 and window_signs.std() > 0:
+                try:
+                    corr = np.corrcoef(window_returns, window_signs)[0,1]
+                    response_proxy_list.append(abs(corr) * 10 + 1)  # Convert to lag-like value
+                except:
+                    response_proxy_list.append(windows[0] // 2)
+            else:
+                response_proxy_list.append(windows[0] // 2)
+    
+    features['response_peak_lag'] = response_proxy_list
 
-    features.to_csv('../data/features.csv', index=False)
-    print(features.head())
-    print(features.shape)
+    sign_autocorr_list = []  # Autocorrelation
+    for i in range(len(features)):
+        if i < windows[0]:
+            sign_autocorr_list.append(0.5)  # Neutral value
+        else:
+            window_signs = features['trade_sign'].iloc[i-windows[0]:i]
+            if len(window_signs) > 2 and window_signs.std() > 0:
+                try:
+                    corr = np.corrcoef(window_signs[:-1], window_signs[1:])[0,1]
+                    sign_autocorr_list.append(max(0, min(1, corr)))  # Clip to [0,1]
+                except:
+                    sign_autocorr_list.append(0.5)
+            else:
+                sign_autocorr_list.append(0.5)
+    
+    features['corr_gamma'] = sign_autocorr_list
 
+    effective_trades_list = []  # Trade consistency
+    for i in range(len(features)):
+        if i < windows[0]:
+            effective_trades_list.append(1)
+        else:
+            window_signs = features['trade_sign'].iloc[i-windows[0]:i]
+            if len(window_signs) > 0:
+                consistency = 1 + abs(window_signs.mean()) * len(window_signs)
+                effective_trades_list.append(consistency)
+            else:
+                effective_trades_list.append(1)
+    
+    features['effective_trades'] = effective_trades_list
+
+    # ================================
+    # LOCAL DIFFUSION VS RESPONSE
+    # ================================
+    
+    # Local diffusion - variance of returns
+    diffusion_rolling = features['returns'].rolling(windows[0]).var()
+    diffusion_expanding = features['returns'].expanding().var()
+    features['local_diffusion'] = diffusion_rolling.fillna(diffusion_expanding).fillna(0)
+    
+    # Simplified local response strength
+    momentum_rolling = features['returns'].rolling(windows[0]).mean()
+    momentum_expanding = features['returns'].expanding().mean()
+    local_momentum = momentum_rolling.fillna(momentum_expanding).fillna(0)
+    
+    trade_intensity_rolling = features['trade_sign'].rolling(windows[0]).std()
+    trade_intensity_expanding = features['trade_sign'].expanding().std()
+    local_trade_intensity = trade_intensity_rolling.fillna(trade_intensity_expanding).fillna(0.5)
+    
+    features['local_response_strength'] = np.abs(local_momentum * local_trade_intensity)
+
+    # ================================
+    # CRITICAL BEHAVIOR INDICATOR
+    # ================================
+    
+    # Distance from criticality
+    features['criticality'] = np.abs(2 * ((1 - features['corr_gamma']) / 2) + features['corr_gamma'] - 1)
+
+    # ================================
+    # WARM-UP PERIOD
+    # ================================
+    
+    # Apply warm-up period to ensure all features are stable
+    features = features.iloc[min_warmup:].copy()
+    
+    # Safety checks
+    features = features.replace([np.inf, -np.inf], 0)
+    features = features.fillna(0)
+    
+    # Check no NaN values remain
+    nan_counts = features.isnull().sum()
+    if nan_counts.sum() > 0:
+        print("Warning: NaN values remain in columns:")
+        for col in nan_counts[nan_counts > 0].index:
+            print(f"  {col}: {nan_counts[col]} NaN values")
+            features[col] = features[col].fillna(0)
+    
+    print(f"Features created: {features.shape}")
+    print(f"Feature columns: {len(features.columns)}")
+    print(f"No NaN values: {not features.isnull().any().any()}")
+    
     return features
 
 def feature_columns(df, exclude_targets=True):
-    
+
     exclude_cols = [
         'timestamp', 'trade_id', 'open_time', 'ignore',
-        'price', 'open', 'high', 'low', 'close'  # raw price data is excluded because we want to learn off market microstructure and market dynamics not price
+        'price', 'open', 'high', 'low', 'close', 'close_time'  # raw price data excluded
     ]
     
     if exclude_targets:
@@ -305,6 +522,26 @@ def feature_columns(df, exclude_targets=True):
     
     feature_cols = [col for col in df.columns if col not in exclude_cols]
     return feature_cols
+
+def target(features_df, horizon=5):
+
+    # Ensure price column exists
+    if 'price' not in features_df.columns:
+        raise ValueError("Price column not found in features DataFrame")
+    
+    price = features_df['price'].fillna(method='ffill').fillna(method='bfill')
+    trade_sign = features_df['trade_sign'].fillna(0)
+    
+    # Future price change
+    price_change = price.shift(-horizon) - price
+    
+    # handle end-of-series NaN values
+    price_change = price_change.fillna(price_change.mean())
+    
+    # Signed impact target
+    target = price_change * trade_sign
+    
+    return target.fillna(0)
 
 # utility function to parse cli args 
 def parse_args():
@@ -317,8 +554,9 @@ if __name__ == "__main__":
     collect = not args.no_collect
     
     if collect:
-        trades = collect_trades()
+        # trades = collect_trades()
         ohlvc = collect_quotes()
+        trades = pd.read_csv('../data/trades_dense.csv')    
         trades = sparsify(trades)
         trades_w_quote = match_quotes(trades, ohlvc)
     else:
@@ -327,4 +565,7 @@ if __name__ == "__main__":
     feature_df = features(trades_w_quote)
     feature_cols = feature_columns(feature_df)
 
-    print("Feature columns:", feature_cols)
+    feature_df.to_csv("../data/features_test.csv", index=False)
+
+    print(f"Final dataset: {len(feature_df)} samples, {len(feature_cols)} features")
+    print(f"Feature columns: {feature_cols}")
