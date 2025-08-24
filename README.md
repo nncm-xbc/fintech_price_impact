@@ -120,7 +120,7 @@ Neural network implementation using JAX for high-performance computation:
 - Propagator Model: Uses theoretical propagator function with learned parameters
 - Performance comparison using MSE and R² metrics
 
-## Installation and Dependencies
+## Installation
 
 ### Prerequisites
 
@@ -177,7 +177,7 @@ project_root/
 └── plots/                    # Generated analysis plots
 ```
 
-## Usage Instructions
+## Usage
 
 ### 1. Data Processing
 
