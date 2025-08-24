@@ -557,11 +557,9 @@ if __name__ == "__main__":
     collect = not args.no_collect
     
     if collect:
-        # trades = collect_trades()
-        # ohlvc = collect_quotes()
-        # trades = sparsify(trades)
-        trades = pd.read_csv('../data/trades_sparse.csv')  
-        ohlvc = pd.read_csv('../data/ohlvc.csv')  
+        trades = collect_trades()
+        ohlvc = collect_quotes()
+        trades = sparsify(trades)
         trades_w_quote = match_quotes(trades, ohlvc)
     else:
         trades_w_quote = pd.read_csv('../data/trades_w_quotes.csv')

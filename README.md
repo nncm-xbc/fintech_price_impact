@@ -1,11 +1,11 @@
 <div align="center">
 
-# **Fintech Price Impact Analysis**
+# **Beyond Static Models in Cryptocurrency Markets**
 
 [Installation](#installation) • [Usage](#usage)
 
 </div>
-This project implements a comprehensive analysis of market impact dynamics, progressing from traditional static models to advanced temporal effects and machine learning approaches. The work is based on the propagator model framework introduced by J.P. Bouchaud in "Fluctuations and response in financial markets: The subtle nature of 'random' price changes."
+This project implements a comprehensive analysis of market impact dynamics, progressing from traditional static models to advanced temporal effects and machine learning approaches. The work applies the propagator model framework introduced by J.P. Bouchaud in "Fluctuations and response in financial markets: The subtle nature of 'random' price changes" to Bitcoin (BTCUSDT) high-frequency trading data, extending the original equity market analysis to cryptocurrency markets.
 
 ## Project Overview
 
@@ -16,109 +16,21 @@ The project analyzes market impact through four main phases:
 3. **Machine Learning Implementation**: Neural network prediction of price impact using microstructure features
 4. **Regime-Dependent Analysis**: Cross-validation across different market conditions
 
-## Data Sources and Processing
-
-### Data Source
+## Data Sources
 
 The project uses high-frequency cryptocurrency trading data from Binance vision:
-https://data.binance.vision/?prefix=data/spot/daily/trades/BTCUSDT/
-https://data.binance.vision/?prefix=data/spot/daily/klines/BTCUSDT/1s/
 
 - **Trade Data**: Individual BTCUSDT trades with nanosecond timestamps
   - Files: `BTCUSDT-trades*.csv` in `data/binance_raw/`
   - Contains: trade_id, price, volume, quote_volume, timestamp, is_buyer_maker, is_best_match
+  
+   https://data.binance.vision/?prefix=data/spot/daily/trades/BTCUSDT/
 
 - **Quote Data**: 1-second OHLCV candle data
   - Files: `BTCUSDT-1s*.csv` in `data/binance_raw/`
   - Contains: open_time, open, high, low, close, volume, quote_volume, count
-
-### Data Processing Pipeline
-
-The data processing follows these steps:
-
-1. **Collection and Consolidation**
-   - Concatenates multiple raw CSV files into unified datasets
-   - Converts timestamps to datetime format
-   - Derives trade signs from `is_buyer_maker` field (-1 for seller-initiated, +1 for buyer-initiated)
-
-2. **Volume Normalization**
-   - Log-normalizes volume to handle extreme values
-   - Creates `log_volume` and `sqrt_volume` features
-   - Scales by median volume to avoid numerical issues
-
-3. **Quote Matching**
-   - Merges trade data with nearest quote data using `merge_asof`
-   - Calculates midpoint prices and spreads
-   - Preserves temporal relationships between trades and market state
-
-4. **Sparsification** (Optional)
-   - Groups trades by timestamp and sign
-   - Volume-weighted price averaging for simultaneous trades
-   - Reduces data density while preserving market impact signal
-
-### Feature Engineering
-
-The feature extraction creates 30+ microstructure features across multiple time windows (5, 20, 50 trades):
-
-**Core Market Features:**
-- Price returns and log returns
-- Volatility metrics (rolling standard deviation)
-- Volume patterns and distributions
-- Trade sign patterns and autocorrelations
-
-**Market Microstructure Features:**
-- Bid-ask spreads and midpoint deviations
-- Order flow imbalance metrics
-- Trade frequency and intensity measures
-- Price range and high-low volatility
-
-**Advanced Features:**
-- Response function approximations
-- Sign correlation decay (gamma parameter)
-- Effective trade measures
-- Local diffusion vs response strength
-- Critical behavior indicators
-- Market regime indicators (price trends)
-
-## Analysis Modules
-
-### Bouchaud Analysis (`src/bouchaud_analysis.py`)
-
-Implements the theoretical framework from Bouchaud's paper:
-
-**Core Functions:**
-- **Response Function R(ℓ)**: Measures average price impact at different time lags
-- **Sign Correlations C₀(ℓ)**: Analyzes persistence of trade sign patterns
-- **Volume-Conditioned Response**: Impact analysis segmented by trade size
-- **Power Law Fitting**: Extracts decay exponents from correlation functions
-- **Critical Behavior Analysis**: Tests theoretical predictions around β_c = (1-γ)/2
-
-**Outputs:**
-- Response function plots with theoretical fits
-- Correlation function analysis with power law decay
-- Critical exponent estimation and validation
-- Volume conditioning effects visualization
-
-### Machine Learning Module (`src/ml.py`)
-
-Neural network implementation using JAX for high-performance computation:
-
-**Architecture:**
-- Fully connected layers with ReLU activation
-- Robust feature scaling using RobustScaler
-- JAX-based automatic differentiation and JIT compilation
-- Configurable architecture (default: input → 64 → 32 → 16 → 1)
-
-**Training:**
-- Mini-batch training with learning rate decay
-- Mean squared error loss function
-- Temporal train/test split to avoid look-ahead bias
-- Model persistence with pickle serialization
-
-**Baselines:**
-- Square-Root Law: Simple ΔP = σ√V × sign model
-- Propagator Model: Uses theoretical propagator function with learned parameters
-- Performance comparison using MSE and R² metrics
+  
+   https://data.binance.vision/?prefix=data/spot/daily/klines/BTCUSDT/1s/
 
 ## Installation
 
