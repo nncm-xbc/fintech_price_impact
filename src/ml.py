@@ -225,11 +225,12 @@ if __name__ == "__main__":
 
     print("JAX devices:", jax.devices())
 
-    layer_sizes = [71, 64, 32, 1] # the first value will be overwritten by the input dimension
 
+    layer_sizes = [71, 64, 30, 1]
     learning_rate = 0.0001
     num_epochs = 200
     batch_size = 256
+
     params = init_network(layer_sizes, random.PRNGKey(0))
 
     # Load and prepare data
